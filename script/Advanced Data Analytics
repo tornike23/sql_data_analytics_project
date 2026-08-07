@@ -1,12 +1,14 @@
--- ============================================================================
--- Advanced SQL Analytics: Sales & Customer Insights
--- ============================================================================
--- This script explores sales trends, product performance, and customer 
--- behavior using window functions, CTEs, and date-based segmentation. 
--- It closes with a reusable customer report view combining demographics, 
--- purchase history, and key behavioral metrics (VIP/Regular/New segments, 
--- average order value, average monthly spend).
--- ============================================================================
+/*
+============================================================================
+Advanced SQL Analytics: Sales & Customer Insights
+============================================================================
+This script explores sales trends, product performance, and customer 
+behavior using window functions, CTEs, and date-based segmentation. 
+It closes with a reusable customer report view combining demographics, 
+purchase history, and key behavioral metrics (VIP/Regular/New segments, 
+average order value, average monthly spend).
+============================================================================
+*/
 
 --Change Over Time (Total_sales, Total_customers, Total_quantity)
 select
