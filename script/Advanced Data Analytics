@@ -1,221 +1,221 @@
--- ============================================================================
--- Advanced SQL Analytics: Sales & Customer Insights
--- ============================================================================
--- This script explores sales trends, product performance, and customer
--- behavior using window functions, CTEs, and date-based segmentation.
--- It closes with a reusable customer report view combining demographics,
--- purchase history, and key behavioral metrics (VIP/Regular/New segments,
--- average order value, average monthly spend).
--- ============================================================================
+/*
+============================================================================
+Advanced SQL Analytics: Sales & Customer Insights
+============================================================================
+This script explores sales trends, product performance, and customer 
+behavior using window functions, CTEs, and date-based segmentation. 
+It closes with a reusable customer report view combining demographics, 
+purchase history, and key behavioral metrics (VIP/Regular/New segments, 
+average order value, average monthly spend).
+============================================================================
+*/
 
--- Change Over Time (Total_sales, Total_customers, Total_quantity)
+--Change Over Time (Total_sales, Total_customers, Total_quantity)
 select
-    extract(month from order_date) as month,
-    sum(sales) as total_sales,
-    count(distinct customer_key) as total_customers,
-    sum(quantity) as total_quantity
+extract(month from order_date) as month,
+sum(sales) as total_sales,
+count(distinct customer_key) as total_customers,
+sum(quantity) as total_quantity
 from gold.fact_sales
 where order_date is not null
 group by extract(month from order_date)
-order by extract(month from order_date);
+order by extract(month from order_date)
 
-
--- Cumulative Analysis (Running_total_sales, Moving_average_price)
+--Cumulative Analysis(Running_total_sales, Moving_average_price)
 select
-    order_date,
-    total_sales,
-    sum(total_sales) over (order by order_date) as running_total_sales,
-    round(avg(avg_price) over (order by order_date)) as moving_average_price
-from (
-    select
-        date_trunc('month', order_date)::date as order_date,
-        sum(sales) as total_sales,
-        avg(price) as avg_price
-    from gold.fact_sales
-    where order_date is not null
-    group by date_trunc('month', order_date)::date
-) t
-order by order_date;
+order_date,
+total_sales,
+sum(total_sales) over(order by order_date) as running_total_sales,
+round(avg(avg_price) over(order by order_date)) as moving_average_price
+from(
+select 
+date_trunc('month', order_date)::date as order_date,
+sum(sales) as total_sales,
+avg(price) as avg_price
+from gold.fact_sales
+where order_date is not null
+group by date_trunc('month', order_date)::date
+)t
+order by order_date
 
-
--- Performance Analysis
+--Performance analysis
 with yearly_product_sales as (
-    select
-        extract(year from order_date) as order_year,
-        p.product_name,
-        sum(sales) as current_sales
-    from gold.fact_sales f
-    left join gold.dim_products p on f.product_key = p.product_key
-    where order_date is not null
-    group by extract(year from order_date), p.product_name
+select 
+extract(year from order_date) as order_year,
+p.product_name,
+sum(sales) as current_sales
+from gold.fact_sales f left join gold.dim_products p
+on f.product_key = p.product_key
+where order_date is not null
+group by extract(year from order_date), p.product_name
 )
-select
-    order_year,
-    product_name,
-    current_sales,
-    round(avg(current_sales) over (partition by product_name)) as avg_sales,
-    current_sales - round(avg(current_sales) over (partition by product_name)) as diff_avg,
-    case
-        when current_sales - round(avg(current_sales) over (partition by product_name)) < 0 then 'Below Average'
-        when current_sales - round(avg(current_sales) over (partition by product_name)) > 0 then 'Above Average'
-        else 'No Change'
-    end as avg_change,
-    -- Year-over-Year Analysis
-    lag(current_sales) over (partition by product_name order by order_year) as py_sales,
-    current_sales - lag(current_sales) over (partition by product_name order by order_year) as diff_py,
-    case
-        when current_sales - lag(current_sales) over (partition by product_name order by order_year) < 0 then 'Decrease'
-        when current_sales - lag(current_sales) over (partition by product_name order by order_year) > 0 then 'Increase'
-        else 'No Change'
-    end as py_change
+
+select 
+order_year,
+product_name,
+current_sales,
+round(avg(current_sales) over(partition by product_name)) as avg_sales,
+current_sales - round(avg(current_sales) over(partition by product_name)) 
+as diff_avg,
+case 
+	when current_sales - round(avg(current_sales) over(partition by product_name)) < 0 then 'Bellow Average'
+	when current_sales - round(avg(current_sales) over(partition by product_name)) > 0 then 'Above Average'
+	else 'no change'
+end as avg_change,
+-- Year_over_year Analysis
+lag(current_sales) over(partition by product_name order by order_year) as py_sales,
+current_sales - lag(current_sales) over(partition by product_name order by order_year) as diff_py,
+case 
+	when current_sales - lag(current_sales) over(partition by product_name order by order_year) < 0 then 'Decrease'
+	when current_sales - lag(current_sales) over(partition by product_name order by order_year) > 0 then 'Increase'
+	else 'no change'
+end as avg_change
 from yearly_product_sales
-order by product_name, order_year;
+order by product_name, order_year
 
-
--- Part-to-Whole Analysis (Percentage_of_total)
+--Part-To_Whole analysis (Percentage_of_total)
 with category_sales as (
-    select
-        product_category,
-        sum(sales) as total_sales
-    from gold.fact_sales f
-    left join gold.dim_products p on f.product_key = p.product_key
-    group by product_category
+select 
+product_category,
+sum(sales) total_sales
+from gold.fact_sales f left join gold.dim_products p
+on f.product_key = p.product_key
+group by product_category
 )
-select
-    product_category,
-    total_sales,
-    sum(total_sales) over () as overall_sales,
-    concat(round((total_sales / sum(total_sales) over ()) * 100, 2), '%') as percentage_of_total
-from category_sales;
 
+select 
+product_category,
+total_sales,
+sum(total_sales) over() overall_sales,
+concat(round((total_sales/sum(total_sales) over()) * 100, 2), '%') as percentage_of_total
+from category_sales
 
--- Data Segmentation (1. Cost Range)
+--Data Segmentation(1.Cost range)
 with product_segment as (
-    select
-        product_key,
-        product_name,
-        cost,
-        case
-            when cost < 100 then 'Below 100'
-            when cost between 100 and 500 then '100-500'
-            when cost between 500 and 1000 then '500-1000'
-            else 'Above 1000'
-        end as cost_range
-    from gold.dim_products
-)
 select
-    cost_range,
-    count(product_key) as total_products
+product_key,
+product_name,
+cost,
+case 
+	 when cost < 100 then 'Bellow 100'
+	 when cost between 100 and 500 then '100-500'
+	 when cost between 500 and 1000 then '500-1000'
+	 else 'Above 1000'
+end as cost_range
+from gold.dim_products
+)
+
+select
+cost_range,
+count(product_key) as total_products
 from product_segment
 group by cost_range
-order by total_products desc;
+order by total_products desc
 
-
--- Data Segmentation (2. Spending Behaviour)
-with spending as (
-    select
-        c.customer_key,
-        sum(f.sales) as total_spend,
-        (extract(year from max(order_date)) - extract(year from min(order_date))) * 12
-      + (extract(month from max(order_date)) - extract(month from min(order_date))) as lifespan
-    from gold.fact_sales f
-    left join gold.dim_customers c on f.customer_key = c.customer_key
-    group by c.customer_key
+--Data Segmentation(2.Spending behaviour)
+with spending as(
+select c.customer_key,
+sum(f.sales) as total_spend,
+	(extract(year from (max(order_date))) - extract(year from (min(order_date)))) * 12
+   +(extract(month from (max(order_date))) - extract(month from (min(order_date)))) as lifespan
+from gold.fact_sales f left join gold.dim_customers c
+on f.customer_key = c.customer_key
+group by c.customer_key
 ),
-segments as (
-    select
-        customer_key,
-        case
-            when lifespan >= 12 and total_spend > 5000 then 'VIP'
-            when lifespan >= 12 and total_spend <= 5000 then 'Regular'
-            else 'New'
-        end as customer_segment
-    from spending
+
+segments as(
+select 
+customer_key,
+case when lifespan >= 12 and total_spend > 5000 then 'VIP'
+     when lifespan >= 12 and total_spend <= 5000 then 'Regular'
+     else 'New'
+end as customer_segment
+from spending
 )
+
 select
-    customer_segment,
-    count(customer_key) as count
+customer_segment,
+count(customer_key) as count
 from segments
-group by customer_segment;
+group by customer_segment
 
-
--- ============================================================================
--- Customer Report View
--- ============================================================================
 create view gold.report_customers as
+/*
+============================================================================
+Customer Report
+============================================================================
+*/
 
 with base_query as (
-    -- Base query
-    select
-        f.order_number,
-        f.product_key,
-        f.order_date,
-        f.sales,
-        f.quantity,
-        c.customer_key,
-        c.customer_number,
-        concat(c.first_name, ' ', c.last_name) as customer_name,
-        extract(year from current_date) - extract(year from c.birthdate) as age
-    from gold.fact_sales f
-    left join gold.dim_customers c on f.customer_key = c.customer_key
-    where f.order_date is not null
+--Base query
+select 
+	f.order_number,
+	f.product_key,
+	f.order_date,
+	f.sales,
+	f.quantity,
+	c.customer_key,
+	c.customer_number,
+	concat(c.first_name, ' ', c.last_name) as customer_name,
+	extract(year from current_date) - extract(year from c.birthdate) as age
+from gold.fact_sales f left join gold.dim_customers c
+on  f.customer_key = c.customer_key
+where f.order_date is not null
 ),
 
 customer_aggregations as (
-    -- Customer aggregations
-    select
-        customer_key,
-        customer_number,
-        customer_name,
-        age,
-        count(distinct order_number) as total_orders,
-        sum(sales) as total_sales,
-        sum(quantity) as total_quantity,
-        count(distinct product_key) as total_products,
-        max(order_date) as last_order_date,
-        (extract(year from max(order_date)) - extract(year from min(order_date))) * 12
-      + (extract(month from max(order_date)) - extract(month from min(order_date))) as lifespan -- months
-    from base_query
-    group by
-        customer_key,
-        customer_number,
-        customer_name,
-        age
+--Customer aggregations
+select 
+	customer_key,
+	customer_number,
+	customer_name,
+	age,
+	count(distinct order_number) as total_orders,
+	sum(sales) as total_sales,
+	sum(quantity) as total_quantity,
+	count(distinct product_key) as total_products,
+	max(order_date) as last_order_date,
+	(extract(year from (max(order_date))) - extract(year from (min(order_date)))) * 12
+   +(extract(month from (max(order_date))) - extract(month from (min(order_date)))) as lifespan -- months
+from base_query
+group by 
+	customer_key,
+	customer_number,
+	customer_name,
+	age
 )
 
 select
-    customer_key,
-    customer_number,
-    customer_name,
-    age,
-    case
-        when age < 20 then 'Under 20'
-        when age between 20 and 29 then '20-29'
-        when age between 30 and 39 then '30-39'
-        when age between 40 and 49 then '40-49'
-        else '50 and above'
-    end as age_group,
-    case
-        when lifespan >= 12 and total_sales > 5000 then 'VIP'
-        when lifespan >= 12 and total_sales <= 5000 then 'Regular'
-        else 'New'
-    end as customer_segment,
-    total_orders,
-    total_sales,
-    total_quantity,
-    total_products,
-    last_order_date,
-    lifespan,
-    -- Average Order Value (AOV)
-    case
-        when total_orders = 0 then 0
-        else total_sales / total_orders
-    end as avg_order_value,
-    -- Average Monthly Spend
-    round(
-        case
-            when lifespan = 0 then total_sales
-            else total_sales / lifespan
-        end
-    ) as avg_monthly_spend
-from customer_aggregations;
+	customer_key,
+	customer_number,
+	customer_name,
+	age,
+	case 
+		 when age < 20 then 'Under 20'
+		 when age between 20 and 29 then '20-29'
+		 when age between 30 and 39 then '30-39'
+		 when age between 40 and 49 then '40-49'
+		 else '50 and above'
+	end as age_group,
+	case 
+		 when lifespan >= 12 and total_sales > 5000 then 'VIP'
+         when lifespan >= 12 and total_sales <= 5000 then 'Regular'
+         else 'New'
+	end as customer_segment,
+	total_orders,
+	total_sales,
+	total_quantity,
+	total_products,
+	last_order_date,
+	lifespan,
+	--Average Order Value (AVO)
+	case 
+		 when total_orders = 0 then 0
+		 else total_sales / total_orders
+	end as avg_order_value,
+	--Avergae Monthly Spend
+	round(case 
+		 when lifespan = 0 then total_sales
+		 else total_sales / lifespan
+	end) as avg_monthly_spend
+from customer_aggregations
